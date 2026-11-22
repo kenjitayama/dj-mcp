@@ -1,0 +1,34 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "dj-mcp",
+  "version": "0.2.0",
+  "description": "An MCP server for controlling playback with the Spotify Web API: search, Spotify Connect playback control (play/pause/skip/volume/queue/transfer), listening history, top items, and playlist creation. Authorization Code + PKCE with your own Spotify app (no client secret). Zero-dependency Node stdio server plus a CLI over the same core. Not affiliated with or endorsed by Spotify.",
+  "author": {
+    "name": "Kenji Tayama"
+  },
+  "homepage": "https://github.com/kenjitayama/dj-mcp",
+  "repository": "https://github.com/kenjitayama/dj-mcp",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "music",
+    "dj",
+    "playback",
+    "spotify-web-api",
+    "agent-plugin"
+  ],
+  "extensions": {
+    "com.cursor": {
+      "variables": {
+        "type": "object",
+        "properties": {
+          "SPOTIFY_CLIENT_ID": {
+            "type": "string",
+            "title": "Spotify Client ID",
+            "description": "Client ID of your own Spotify developer app (public, not a secret). Optional if client_id is set in ~/.config/dj-mcp/config.json."
+          }
+        }
+      }
+    }
+  }
+}

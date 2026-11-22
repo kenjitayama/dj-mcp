@@ -1,0 +1,27 @@
+{
+  "name": "dj-mcp",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "An MCP server and CLI for controlling playback with the Spotify Web API (zero dependencies). Not affiliated with Spotify.",
+  "license": "MIT",
+  "author": "Kenji Tayama",
+  "homepage": "https://github.com/kenjitayama/dj-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kenjitayama/dj-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kenjitayama/dj-mcp/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "dj-mcp": "bin/dj-mcp",
+    "dj-mcp-server": "bin/dj-mcp-server"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

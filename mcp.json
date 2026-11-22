@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "dj-mcp": {
+      "type": "stdio",
+      "command": "./bin/dj-mcp-server",
+      "cwd": "${PLUGIN_ROOT}",
+      "env": {
+        "SPOTIFY_CLIENT_ID": "${SPOTIFY_CLIENT_ID}"
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+# Secrets / auth state (normally live in ~/.config/dj-mcp, never in the repo)
+tokens.json
+tokens*.json
+pending_auth.json
+config.json
+*.tmp
+.env
+.env.*
+*.pem
+*.key
+
+# Local, machine-specific notes and artifacts
+LOCAL.md
+*.local.md
+VERIFY.local.md
+artifacts/
+*.log
+
+# Tooling
+node_modules/
+coverage/
+.DS_Store
+
