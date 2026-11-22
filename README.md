@@ -17,6 +17,48 @@ Currently supports Spotify. In the future, I'd like to consider supporting other
 > "Spotify" is a trademark of Spotify AB and is used here only to describe the API this tool works with.
 > Playback control needs Spotify Premium.
 
+## Setup with an AI agent
+**For users:** give your AI agent (Codex, Claude, Cursor, Grok Bot, or similar) this repo URL and ask it to set it up:
+"Set this up: https://github.com/kenjitayama/dj-mcp". The agent can handle the rest except three steps that need you:
+
+1. **Have Spotify Premium.** Playback control requires it.
+2. **Create your own Spotify app** in the [Developer Dashboard](https://developer.spotify.com/dashboard), with Redirect URI
+   `http://127.0.0.1:8888/callback` and **Web API** checked. Give the agent its Client ID. Each person or app uses its
+   own Client ID, and no client secret is needed. Details: [1. Create a Spotify app](#1-create-a-spotify-app).
+3. **Approve in the browser.** Open the link the agent shows you and click Agree. You'll land on a "can't connect" page,
+   which is expected. Copy the **full URL** from the address bar and paste it back to the agent within a few minutes,
+   before the code expires.
+
+**For agents**, step by step:
+1. Check `node --version` is >= 20.
+2. Run `git clone https://github.com/kenjitayama/dj-mcp /path/to/dj-mcp`. Below, `CLI` means `/path/to/dj-mcp/bin/dj-mcp`.
+3. Save the user's Client ID, either as env `SPOTIFY_CLIENT_ID` or in `~/.config/dj-mcp/config.json`
+   (folder 0700, file 0600). See [2. Set the Client ID](#2-set-the-client-id).
+4. Run `CLI auth_start` and show the user the `authorize_url`.
+5. Run `CLI auth_complete --redirect_url '<pasted URL>'`. Single-quote the URL, because it contains `&`.
+6. Run `CLI auth_status` and confirm `authorized: true` and `missing_scopes: []`.
+7. Run `CLI get_devices`. Devices only appear while a Spotify app is open, so if the list is empty, ask the user to open one.
+8. With the user's OK, test playback: `CLI search --query '<song>'`, then `CLI transfer_playback --device_name '<name>'` and
+   `CLI play --json '{"uris":["<track uri>"]}'`.
+9. Register the MCP server (`node /path/to/dj-mcp/bin/dj-mcp-server`) with the user's client:
+   - **Cursor / Claude Desktop:** see [Cursor](#cursor) and [Claude Desktop](#claude-desktop).
+   - **Claude Code:** `claude mcp add --transport stdio --scope user dj-mcp -- node /path/to/dj-mcp/bin/dj-mcp-server`
+   - **Codex:** `codex mcp add dj-mcp -- node /path/to/dj-mcp/bin/dj-mcp-server`, or in `~/.codex/config.toml`:
+     ```toml
+     [mcp_servers.dj-mcp]
+     command = "node"
+     args = ["/path/to/dj-mcp/bin/dj-mcp-server"]
+     ```
+   - **Anything else:** see [MCP: generic stdio](#mcp-generic-stdio).
+
+   If the Client ID is in `config.json`, no env setting is needed in the client config.
+
+**Rules for agents:**
+- Never commit tokens or the Client ID to the repo, and never paste them into it.
+- Don't print tokens.
+- Don't ask for a client secret. It isn't needed.
+- Don't re-run `auth_start` while an authorization is pending, because it invalidates the earlier link.
+
 ## How this differs from other Spotify MCP servers
 There are several good Spotify MCP servers out there. This one makes a few particular choices that might suit some setups:
 
