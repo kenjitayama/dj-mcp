@@ -67,3 +67,102 @@ test('bad arguments are invalid_argument errors', async () => {
     await assert.rejects(c.callTool('recommend', args), { code: 'invalid_argument' }, JSON.stringify(args));
   }
 });
+
+// ---- R3: turning djdb items into playable Spotify tracks ----
+
+function authorizedDir() {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, 'tokens.json'), JSON.stringify({ access_token: 'AT', refresh_token: 'RT', scope: '', expires_at: 4_000_000_000_000, client_id: 'cid' }), { mode: 0o600 });
+  return dir;
+}
+
+const track = (id, name, artist, { isrc, playable = true } = {}) => ({
+  id, uri: `spotify:track:${id}`, name, artists: [{ name: artist }], album: { name: 'A' }, duration_ms: 1, external_ids: isrc ? { isrc } : {}, is_playable: playable,
+});
+
+/** Spotify search answered from `byQuery` (query string → tracks), or a 429 for queries in `limited`. */
+function spotify(byQuery = {}, { limited = [] } = {}) {
+  const searches = [];
+  const fetch = async (url) => {
+    const u = new URL(String(url));
+    if (u.pathname === '/v1/search') {
+      const q = u.searchParams.get('q');
+      searches.push({ q, market: u.searchParams.get('market'), type: u.searchParams.get('type') });
+      if (limited.includes(q)) return new Response('{}', { status: 429, headers: { 'retry-after': '120' } });
+      return new Response(JSON.stringify({ tracks: { items: byQuery[q] || [] } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ error: { message: `no route ${u.pathname}` } }), { status: 404 });
+  };
+  return { fetch, searches };
+}
+
+const run = (f, s, args = {}) => createCore({ configDir: authorizedDir(), clientId: 'cid', djdb: f.djdb, fetch: s.fetch, sleep: async () => {} }).callTool('recommend', args);
+
+test('a cached play target needs no search', async () => {
+  const f = fakeDjdb({ items: [item(1, { playable: { provider: 'spotify', ext_id: 'c1', play_uri: 'spotify:track:c1', market: 'JP', resolved_by: 'cache' } })] });
+  const s = spotify();
+  const r = await run(f, s, { n: 1 });
+  assert.equal(s.searches.length, 0);
+  assert.deepEqual(r.items.map((i) => [i.uri, i.resolved_by]), [['spotify:track:c1', 'cache']]);
+  assert.deepEqual(f.calls.external, []);
+  assert.deepEqual(f.calls.events, [{ runId: 7, rank: 1, kind: 'impression' }]);
+});
+
+test('ISRC first, else title and artist, always with the market; only the same recording counts', async () => {
+  const f = fakeDjdb({ items: [
+    item(1, { title: 'Blue', artist: 'Kai', isrc: 'JPAA00000001' }),
+    item(2, { title: 'Red', artist: 'Mio' }),
+    item(3, { title: 'Green', artist: 'Ren feat. Someone' }),
+  ] });
+  const s = spotify({
+    'isrc:JPAA00000001': [track('t1', 'Blue (Remaster)', 'Kai', { isrc: 'JPAA00000001' })],
+    'track:"Red" artist:"Mio"': [track('x2', 'Red Light', 'Mio')],
+    'track:"Green" artist:"Ren feat. Someone"': [track('t3', 'GREEN', 'Ren')],
+  });
+  const r = await run(f, s, { n: 3, market: 'us' });
+  assert.deepEqual(s.searches.map((x) => [x.q, x.market, x.type]), [
+    ['isrc:JPAA00000001', 'US', 'track'], ['track:"Red" artist:"Mio"', 'US', 'track'], ['track:"Green" artist:"Ren feat. Someone"', 'US', 'track'],
+  ]);
+  assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t1', 'spotify:track:t3']);
+  assert.deepEqual(f.calls.external, [{ runId: 7, opts: { market: 'US' }, results: [
+    { rank: 1, provider: 'spotify', status: 'ok', extId: 't1', playUri: 'spotify:track:t1', method: 'isrc' },
+    { rank: 2, provider: 'spotify', status: 'not_found' },
+    { rank: 3, provider: 'spotify', status: 'ok', extId: 't3', playUri: 'spotify:track:t3', method: 'name' },
+  ] }]);
+});
+
+test('an unplayable result is not used; n playable tracks are collected and only they get impressions', async () => {
+  const f = fakeDjdb({ items: [1, 2, 3, 4, 5].map((k) => item(k)) });
+  const s = spotify({
+    'track:"Song 1" artist:"Artist 1"': [track('t1', 'Song 1', 'Artist 1', { playable: false })],
+    'track:"Song 2" artist:"Artist 2"': [track('t2', 'Song 2', 'Artist 2')],
+    'track:"Song 3" artist:"Artist 3"': [track('t3', 'Song 3', 'Artist 3')],
+  });
+  const r = await run(f, s, { n: 2 });
+  assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t2', 'spotify:track:t3']);
+  assert.equal(s.searches.length, 3, 'items after the n-th playable one are not searched');
+  assert.deepEqual(f.calls.external[0].results.map((x) => [x.rank, x.status]), [[1, 'not_found'], [2, 'ok'], [3, 'ok']]);
+  assert.deepEqual(f.calls.events.map((e) => e.rank), [2, 3]);
+});
+
+test('a 429 writes nothing for that item and stops; what was found before is kept', async () => {
+  const f = fakeDjdb({ items: [item(1), item(2), item(3)] });
+  const s = spotify({ 'track:"Song 1" artist:"Artist 1"': [track('t1', 'Song 1', 'Artist 1')] }, { limited: ['track:"Song 2" artist:"Artist 2"'] });
+  const r = await run(f, s, { n: 3 });
+  assert.equal(r.stopped.code, 'rate_limited');
+  assert.equal(r.stopped.retry_after, 120);
+  assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t1']);
+  assert.deepEqual(f.calls.external[0].results.map((x) => x.rank), [1]);
+  assert.deepEqual(f.calls.events.map((e) => e.rank), [1]);
+  assert.equal(s.searches.length, 2);
+});
+
+test('a 429 on the first item records nothing at all', async () => {
+  const f = fakeDjdb({ items: [item(1), item(2)] });
+  const s = spotify({}, { limited: ['track:"Song 1" artist:"Artist 1"'] });
+  const r = await run(f, s, { n: 2 });
+  assert.equal(r.stopped.code, 'rate_limited');
+  assert.deepEqual(r.items, []);
+  assert.deepEqual(f.calls.external, []);
+  assert.deepEqual(f.calls.events, []);
+});
