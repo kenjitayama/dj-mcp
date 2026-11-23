@@ -202,12 +202,15 @@ URIs can also be `open.spotify.com/...` links.
 `Artist {uri,name,genres[]}` · `Playlist {uri,id,name,owner,public,total_items,description}`.
 
 ## Optional: recommendations from your listening history
-[djdb-mcp](https://github.com/kenjitayama/djdb-mcp) keeps a local SQLite library of your ListenBrainz listens.
+Spotify removed Recommendations and Related Artists for new and development-mode Web API apps on 2024-11-27
+(see the limits below), and ListenBrainz computes personal recommendations in batches.
+[djdb-mcp](https://github.com/kenjitayama/djdb-mcp) keeps your own listening history in a local database and gives
+AI agents an on-demand recommender built on it. dj-mcp resolves its picks to tracks playable on Spotify.
 When it is installed and Node is 24.15+ or 26, dj-mcp adds one tool, `recommend`.
 Without it, or on Node 20/22, dj-mcp is exactly the tool list above.
 
 - Install: `npm install` in this checkout. djdb-mcp is an optional dependency pinned to its `v0.2.0` tag.
-  npm skips it on Node 20/22, and while that tag does not exist.
+  npm skips it on Node 20/22.
 - Set up the library once with djdb-mcp's `djdb init` and `djdb refresh` (see its README).
 - `recommend {mode?, n?, market?, seeds?}`. `mode` is `discover` (default: recordings you have not played,
   from artists near your taste) or `rediscover` (artists you played a lot in an earlier era). `n` is 1..20
@@ -234,7 +237,7 @@ the March 2026 changelog, and the November 2024 Web API announcement.
   other users' profiles and playlists, markets. `popularity` and some other fields were removed from objects.
 - Unavailable to development-mode apps since 2024-11-27: recommendations, related artists, audio features,
   audio analysis, featured playlists, category playlists, and 30-second preview URLs.
-  The agent has to choose tracks itself from search, top items and recent plays.
+  Without djdb-mcp, the agent has to choose tracks itself from search, top items and recent plays.
 
 ## Development
 ```bash
