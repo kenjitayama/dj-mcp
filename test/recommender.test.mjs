@@ -166,6 +166,23 @@ test('a search response without tracks.items stops the walk and records nothing 
   assert.equal(s.searches.length, 2);
 });
 
+test('a Spotify track already picked is not used twice; the walk moves on to the next item', async () => {
+  const f = fakeDjdb({ items: [
+    item(1, { playable: { provider: 'spotify', ext_id: 'c1', play_uri: 'spotify:track:c1', market: 'JP', resolved_by: 'cache' } }),
+    item(2), item(3), item(4), item(5),
+  ] });
+  const s = spotify({
+    'track:"Song 2" artist:"Artist 2"': [track('c1', 'Song 2', 'Artist 2')],
+    'track:"Song 3" artist:"Artist 3"': [track('t3', 'Song 3', 'Artist 3')],
+    'track:"Song 4" artist:"Artist 4"': [track('t3', 'Song 4', 'Artist 4')],
+    'track:"Song 5" artist:"Artist 5"': [track('t5', 'Song 5', 'Artist 5')],
+  });
+  const r = await run(f, s, { n: 5 });
+  assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:c1', 'spotify:track:t3', 'spotify:track:t5']);
+  assert.deepEqual(f.calls.external[0].results.map((x) => [x.rank, x.status]), [[3, 'ok'], [5, 'ok']]);
+  assert.deepEqual(f.calls.events.map((e) => e.rank), [1, 3, 5]);
+});
+
 test('a 429 writes nothing for that item and stops; what was found before is kept', async () => {
   const f = fakeDjdb({ items: [item(1), item(2), item(3)] });
   const s = spotify({ 'track:"Song 1" artist:"Artist 1"': [track('t1', 'Song 1', 'Artist 1')] }, { limited: ['track:"Song 2" artist:"Artist 2"'] });
