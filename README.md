@@ -201,6 +201,25 @@ URIs can also be `open.spotify.com/...` links.
 `Playback {device,item,is_playing,progress_ms,shuffle,repeat}` · `Album {uri,name,artists[],release_date,total_tracks}` ·
 `Artist {uri,name,genres[]}` · `Playlist {uri,id,name,owner,public,total_items,description}`.
 
+## Optional: recommendations from your listening history
+[djdb-mcp](https://github.com/kenjitayama/djdb-mcp) keeps a local SQLite library of your ListenBrainz listens.
+When it is installed and Node is 24.15+ or 26, dj-mcp adds one tool, `recommend`.
+Without it, or on Node 20/22, dj-mcp is exactly the tool list above.
+
+- Install: `npm install` in this checkout. djdb-mcp is an optional dependency pinned to its `v0.2.0` tag.
+  npm skips it on Node 20/22, and while that tag does not exist.
+- Set up the library once with djdb-mcp's `djdb init` and `djdb refresh` (see its README).
+- `recommend {mode?, n?, market?, seeds?}`. `mode` is `discover` (default: recordings you have not played,
+  from artists near your taste) or `rediscover` (artists you played a lot in an earlier era). `n` is 1..20
+  (default 10). `market` is the country the tracks must be playable in (default `JP`). `seeds` are up to 5
+  artist names, Spotify artist URIs/links or MusicBrainz artist IDs.
+- Returns `{mode, market, run_id, items: [{uri, name, artists, recording_mbid, isrc, resolved_by}]}`, plus
+  `unresolved_seeds`, `stopped` (a Spotify search failed, e.g. a 429; try again later) or `note` when they apply.
+  Pass the URIs to `play` or `add_to_queue`.
+- When the library is not ready, the tool returns `{disabled: true, reason, hint}` and every other tool works as usual.
+- It writes only to djdb's online database: the run, the Spotify IDs it found for each market, and which
+  tracks it showed you. The listening library itself is read-only here.
+
 ## Spotify development-mode limits
 Checked against developer.spotify.com in November 2026: the February 2026 Web API changelog and migration guide,
 the March 2026 changelog, and the November 2024 Web API announcement.

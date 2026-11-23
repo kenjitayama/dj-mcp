@@ -17,6 +17,9 @@
   "engines": {
     "node": ">=20"
   },
+  "optionalDependencies": {
+    "@kenjitayama/djdb-mcp": "github:kenjitayama/djdb-mcp#v0.2.0"
+  },
   "bin": {
     "dj-mcp": "bin/dj-mcp",
     "dj-mcp-server": "bin/dj-mcp-server"
