@@ -22,6 +22,7 @@ export function fakeDjdb({ status = { ok: true }, items = [], apiVersion = 2, op
       return { run_id: 7, items: state.items, unresolved };
     },
     recordExternalIds(_online, runId, results, opts) {
+      if (results.some((r) => r.status !== 'ok' && r.status !== 'not_found')) throw new Error('429/network errors are not recorded');
       calls.external.push({ runId, results, opts });
       return { ok: true, log: [] };
     },

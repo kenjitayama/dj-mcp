@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { probeDjdb } from '../lib/recommender.mjs';
+import { fakeDjdb } from './djdb-fake.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const skip = probeDjdb() ? false : 'djdb-mcp is not installed, or this Node is outside its range';
@@ -65,4 +66,14 @@ test('real djdb, default paths under a temp HOME and XDG dirs: disabled, and no 
   assert.equal(r.disabled, true);
   assert.ok(r.reason.includes(path.join(base, 'data', 'djdb-mcp')), r.reason);
   assert.deepEqual(tree(base), before);
+});
+
+test('the fake used by recommender.test.mjs has the real module\'s API_VERSION and function names', { skip }, async () => {
+  const real = await import('@kenjitayama/djdb-mcp');
+  const fake = await fakeDjdb().djdb.load();
+  assert.equal(fake.API_VERSION, real.API_VERSION);
+  for (const [name, fn] of Object.entries(fake)) {
+    if (typeof fn !== 'function') continue;
+    assert.equal(typeof real[name], 'function', `${name} is not exported by djdb-mcp`);
+  }
 });
