@@ -37,11 +37,15 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: npm install --no-audit --no-fund
       # npm skips djdb-mcp without an error on Node 20/22 (its engines) and while its tag is missing.
-      - name: Report whether djdb-mcp was installed
+      # On Node 24 it must be there, or this job would quietly test the same thing as the one above.
+      - name: Check whether djdb-mcp was installed
         run: |
           if [ -f node_modules/@kenjitayama/djdb-mcp/package.json ]; then
             echo "djdb-mcp $(node -p "require('./node_modules/@kenjitayama/djdb-mcp/package.json').version") installed"
+          elif [ "${{ matrix.node }}" = "24" ]; then
+            echo "::error::djdb-mcp was not installed on Node 24. Does the tag in package.json exist?"
+            exit 1
           else
-            echo "::warning::djdb-mcp was not installed on Node ${{ matrix.node }}; this job ran without it"
+            echo "djdb-mcp skipped on Node ${{ matrix.node }}, as expected"
           fi
       - run: npm test
