@@ -1,0 +1,390 @@
+[
+  {
+    "name": "auth_start",
+    "description": "Begin Spotify authorization (PKCE). Returns authorize_url for the user to open; after approving they paste the redirected URL into auth_complete.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "auth_complete",
+    "description": "Finish authorization: pass the full redirect URL the user copied from the browser address bar (http://127.0.0.1:8888/callback?code=...&state=...), or a bare code. Verifies state and stores tokens.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "redirect_url": {
+          "type": "string",
+          "description": "Full redirected URL (preferred; state is verified)."
+        },
+        "code": {
+          "type": "string",
+          "description": "Bare authorization code (state cannot be verified unless state is also given)."
+        },
+        "state": {
+          "type": "string",
+          "description": "Optional state when passing a bare code."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "auth_status",
+    "description": "Report whether Spotify is authorized, token expiry, granted/missing scopes. Never reveals tokens.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "search",
+    "description": "Search the Spotify catalog. types: track, album, artist, playlist. limit is clamped to 1..10 (development-mode maximum). Use offset to page.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search text; supports field filters like artist:\"Name\" year:1990-1999 genre:jazz."
+        },
+        "types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "track",
+              "album",
+              "artist",
+              "playlist"
+            ]
+          },
+          "description": "Default [\"track\"]."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Results per type, default 5, max 10."
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "market": {
+          "type": "string",
+          "description": "ISO country code or \"from_token\"."
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_devices",
+    "description": "List Spotify Connect devices currently available (the Spotify app must be open on a device for it to appear).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "transfer_playback",
+    "description": "Move playback to a device (makes it the active device). Set play=true to start playing there.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string",
+          "description": "Target device id from get_devices. Omit to use the active device."
+        },
+        "device_name": {
+          "type": "string",
+          "description": "Alternative to device_id: device name (case-insensitive, substring ok), e.g. \"Living Room\"."
+        },
+        "play": {
+          "type": "boolean",
+          "description": "Start playing after transfer (default false keeps current state)."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "play",
+    "description": "Start/resume playback. Give uris (list of track/episode URIs) OR context_uri (album/playlist/artist URI) with optional offset (0-based position or a track URI inside the context). No uris/context = resume.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uris": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Track/episode URIs or open.spotify.com links."
+        },
+        "context_uri": {
+          "type": "string",
+          "description": "Album, playlist, or artist URI/link."
+        },
+        "offset": {
+          "description": "0-based index or a track URI within context_uri.",
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "position_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "device_id": {
+          "type": "string",
+          "description": "Target device id from get_devices. Omit to use the active device."
+        },
+        "device_name": {
+          "type": "string",
+          "description": "Alternative to device_id: device name (case-insensitive, substring ok), e.g. \"Living Room\"."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "pause",
+    "description": "Pause playback.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string",
+          "description": "Target device id from get_devices. Omit to use the active device."
+        },
+        "device_name": {
+          "type": "string",
+          "description": "Alternative to device_id: device name (case-insensitive, substring ok), e.g. \"Living Room\"."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "next",
+    "description": "Skip to the next item in the queue.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string",
+          "description": "Target device id from get_devices. Omit to use the active device."
+        },
+        "device_name": {
+          "type": "string",
+          "description": "Alternative to device_id: device name (case-insensitive, substring ok), e.g. \"Living Room\"."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "previous",
+    "description": "Skip to the previous item.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string",
+          "description": "Target device id from get_devices. Omit to use the active device."
+        },
+        "device_name": {
+          "type": "string",
+          "description": "Alternative to device_id: device name (case-insensitive, substring ok), e.g. \"Living Room\"."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "set_volume",
+    "description": "Set volume 0-100 on the active (or given) device. Some devices (phones, some speakers) do not allow volume control.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "volume_percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "device_id": {
+          "type": "string",
+          "description": "Target device id from get_devices. Omit to use the active device."
+        },
+        "device_name": {
+          "type": "string",
+          "description": "Alternative to device_id: device name (case-insensitive, substring ok), e.g. \"Living Room\"."
+        }
+      },
+      "required": [
+        "volume_percent"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "add_to_queue",
+    "description": "Append a track or episode to the playback queue.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string",
+          "description": "Target device id from get_devices. Omit to use the active device."
+        },
+        "device_name": {
+          "type": "string",
+          "description": "Alternative to device_id: device name (case-insensitive, substring ok), e.g. \"Living Room\"."
+        }
+      },
+      "required": [
+        "uri"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_currently_playing",
+    "description": "Current playback state: device, item (Track), is_playing, progress_ms, shuffle, repeat.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_recently_played",
+    "description": "Recently played tracks (most recent first), each with played_at.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "before": {
+          "type": "integer",
+          "description": "Unix ms cursor."
+        },
+        "after": {
+          "type": "integer",
+          "description": "Unix ms cursor."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_top_items",
+    "description": "The user's top tracks or artists. time_range: short_term (~4 weeks), medium_term (~6 months, default), long_term (~1 year).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "tracks",
+            "artists"
+          ]
+        },
+        "time_range": {
+          "type": "string",
+          "enum": [
+            "short_term",
+            "medium_term",
+            "long_term"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "create_playlist",
+    "description": "Create a playlist in the user's account (POST /me/playlists). Private by default.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "public": {
+          "type": "boolean",
+          "description": "Default false."
+        },
+        "collaborative": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "add_items_to_playlist",
+    "description": "Add tracks/episodes to a playlist the user owns or collaborates on (POST /playlists/{id}/items; batches of 100).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "playlist_id": {
+          "type": "string",
+          "description": "Playlist id, URI, or open.spotify.com link."
+        },
+        "uris": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Insert position (default: append)."
+        }
+      },
+      "required": [
+        "playlist_id",
+        "uris"
+      ],
+      "additionalProperties": false
+    }
+  }
+]
