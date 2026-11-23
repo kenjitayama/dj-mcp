@@ -18,7 +18,7 @@
     "node": ">=20"
   },
   "optionalDependencies": {
-    "@kenjitayama/djdb-mcp": "github:kenjitayama/djdb-mcp#v0.2.0"
+    "@kenjitayama/djdb-mcp": "github:kenjitayama/djdb-mcp#v0.2.1"
   },
   "bin": {
     "dj-mcp": "bin/dj-mcp",

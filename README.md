@@ -209,7 +209,7 @@ AI agents an on-demand recommender built on it. dj-mcp resolves its picks to tra
 When it is installed and Node is 24.15+ or 26, dj-mcp adds one tool, `recommend`.
 Without it, or on Node 20/22, dj-mcp is exactly the tool list above.
 
-- Install: `npm install` in this checkout. djdb-mcp is an optional dependency pinned to its `v0.2.0` tag.
+- Install: `npm install` in this checkout. djdb-mcp is an optional dependency pinned to its `v0.2.1` tag.
   npm skips it on Node 20/22.
 - Set up the library once with djdb-mcp's `djdb init` and `djdb refresh` (see its README).
 - `recommend {mode?, n?, market?, seeds?}`. `mode` is `discover` (default: recordings you have not played,
