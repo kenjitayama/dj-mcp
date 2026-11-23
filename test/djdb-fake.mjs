@@ -3,8 +3,8 @@
 
 const norm = (s) => String(s ?? '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
-export function fakeDjdb({ status = { ok: true }, items = [], apiVersion = 2, openError, loadError } = {}) {
-  const state = { status, items, openError };
+export function fakeDjdb({ status = { ok: true }, items = [], apiVersion = 2, openError, loadError, unknownSeedNames = [] } = {}) {
+  const state = { status, items, openError, unknownSeedNames };
   const calls = { load: 0, open: [], closed: 0, recommend: [], external: [], events: [] };
   const mod = {
     API_VERSION: apiVersion,
@@ -18,7 +18,8 @@ export function fakeDjdb({ status = { ok: true }, items = [], apiVersion = 2, op
     status: () => state.status,
     async recommend(_h, opts) {
       calls.recommend.push(opts);
-      return { run_id: 7, items: state.items };
+      const unresolved = (opts.seeds || []).filter((s) => state.unknownSeedNames.includes(s.name)).map((s) => ({ input: s, reason: 'not_found' }));
+      return { run_id: 7, items: state.items, unresolved };
     },
     recordExternalIds(_online, runId, results, opts) {
       calls.external.push({ runId, results, opts });

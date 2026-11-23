@@ -166,3 +166,47 @@ test('a 429 on the first item records nothing at all', async () => {
   assert.deepEqual(f.calls.external, []);
   assert.deepEqual(f.calls.events, []);
 });
+
+// ---- R4: seeds ----
+
+test('seeds: Spotify artist URIs and links become names; djdb never sees a URI', async () => {
+  const f = fakeDjdb({ items: [item(1, { playable: { play_uri: 'spotify:track:c1' } })], unknownSeedNames: ['Nobody Here'] });
+  const artistCalls = [];
+  const fetch = async (url) => {
+    const u = new URL(String(url));
+    const m = u.pathname.match(/^\/v1\/artists\/(\w+)$/);
+    if (m) {
+      artistCalls.push(m[1]);
+      if (m[1] === 'gone') return new Response(JSON.stringify({ error: { status: 404, message: 'Not found' } }), { status: 404 });
+      return new Response(JSON.stringify({ id: m[1], name: `Name of ${m[1]}` }), { status: 200 });
+    }
+    return new Response('{}', { status: 404 });
+  };
+  const mbid = 'A1B2C3D4-0000-4000-8000-000000000001';
+  const core = createCore({ configDir: authorizedDir(), clientId: 'cid', djdb: f.djdb, fetch, sleep: async () => {} });
+  const r = await core.callTool('recommend', {
+    n: 1,
+    seeds: ['spotify:artist:ar1', 'https://open.spotify.com/intl-ja/artist/ar2?si=x', mbid, 'Nobody Here', 'spotify:artist:gone'],
+  });
+  assert.deepEqual(artistCalls, ['ar1', 'ar2', 'gone']);
+  const sent = f.calls.recommend[0].seeds;
+  assert.deepEqual(sent, [{ name: 'Name of ar1' }, { name: 'Name of ar2' }, { mbid: mbid.toLowerCase() }, { name: 'Nobody Here' }]);
+  assert.doesNotMatch(JSON.stringify(sent), /spotify/i);
+  assert.deepEqual(r.unresolved_seeds.map((u) => [u.input, u.reason]), [
+    ['spotify:artist:gone', 'not_found'],
+    ['Nobody Here', 'not_found'],
+  ]);
+  const track = await core.callTool('recommend', { n: 1, seeds: ['spotify:track:tr1'] });
+  assert.deepEqual(f.calls.recommend[1].seeds, []);
+  assert.deepEqual(track.unresolved_seeds.map((u) => [u.input, u.reason]), [['spotify:track:tr1', 'invalid_argument']]);
+  assert.deepEqual(artistCalls, ['ar1', 'ar2', 'gone']);
+});
+
+test('seeds must be a short list of strings', async () => {
+  const f = fakeDjdb();
+  const core = createCore({ configDir: tmpDir(), clientId: 'cid', djdb: f.djdb });
+  for (const seeds of ['Kai', [1], [''], ['a', 'b', 'c', 'd', 'e', 'f']]) {
+    await assert.rejects(core.callTool('recommend', { seeds }), (e) => e.code === 'invalid_argument', JSON.stringify(seeds));
+  }
+  assert.deepEqual(f.calls.recommend, []);
+});
