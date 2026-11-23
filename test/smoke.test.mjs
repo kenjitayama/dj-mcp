@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { probeDjdb } from '../lib/recommender.mjs';
 
 const FAKE_ID = 'fakeclientid0000000000000000test';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -52,7 +53,7 @@ test('MCP stdio: initialize, tools/list, tools/call', async () => {
   send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
   const names = (await wait(2)).result.tools.map((t) => t.name);
   const expected = ['auth_start', 'auth_complete', 'auth_status', 'search', 'get_devices', 'transfer_playback', 'play', 'pause', 'next', 'previous', 'set_volume', 'add_to_queue', 'get_currently_playing', 'get_recently_played', 'get_top_items', 'create_playlist', 'add_items_to_playlist'];
-  assert.deepEqual(names, expected);
+  assert.deepEqual(names, probeDjdb() ? [...expected, 'recommend'] : expected);
 
   send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'auth_status', arguments: {} } });
   const st = await wait(3);

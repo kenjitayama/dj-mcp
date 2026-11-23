@@ -9,11 +9,18 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createCore, SCOPES, DEFAULT_REDIRECT_URI } from '../lib/core.mjs';
+import { probeDjdb } from '../lib/recommender.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixtures = path.join(root, 'test', 'fixtures');
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sdj-contract-'));
 const NOW = 1_800_000_000_000;
+// With djdb-mcp installed on a Node in its range, recommend is appended. Without it, the list is exactly the pinned one.
+const WITH_DJDB = probeDjdb();
+const pinnedPlusOptional = (list, golden) => {
+  assert.deepEqual(WITH_DJDB ? list.slice(0, -1) : list, golden);
+  if (WITH_DJDB) assert.equal(list.at(-1).name, 'recommend');
+};
 
 function withEnv(vars, fn) {
   const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
@@ -34,7 +41,7 @@ function seedTokens(dir, over = {}) {
 test('tools/list is exactly the pinned list (names, descriptions, input schemas)', () => {
   const golden = JSON.parse(fs.readFileSync(path.join(fixtures, 'contract-tools.json'), 'utf8'));
   const core = createCore({ configDir: tmpDir(), clientId: 'cid' });
-  assert.deepEqual(core.tools, golden);
+  pinnedPlusOptional(core.tools, golden);
 });
 
 test('auth_status shape: authorized with matching client id', async () => {
@@ -221,6 +228,6 @@ test('CLI: tools lists every tool with its params', () => {
   const r = cli(['tools']);
   assert.equal(r.code, 0);
   const golden = JSON.parse(fs.readFileSync(path.join(fixtures, 'contract-tools.json'), 'utf8'));
-  assert.deepEqual(r.out.tools, golden.map((t) => ({ name: t.name, description: t.description, params: Object.keys(t.inputSchema.properties || {}) })));
+  pinnedPlusOptional(r.out.tools, golden.map((t) => ({ name: t.name, description: t.description, params: Object.keys(t.inputSchema.properties || {}) })));
   assert.deepEqual(r.requests, []);
 });
