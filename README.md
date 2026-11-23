@@ -220,8 +220,8 @@ Without it, or on Node 20/22, dj-mcp is exactly the tool list above.
   `unresolved_seeds`, `stopped` (a Spotify search failed, e.g. a 429; try again later) or `note` when they apply.
   Pass the URIs to `play` or `add_to_queue`.
 - When the library is not ready, the tool returns `{disabled: true, reason, hint}` and every other tool works as usual.
-- It writes only to djdb's online database: the run, the Spotify IDs it found for each market, and which
-  tracks it showed you. The listening library itself is read-only here.
+- It writes only to djdb's local run log (`djdb-online.sqlite`, next to the main DB): the run, the Spotify IDs
+  it found for each market, and which tracks it showed you. The listening library itself is read-only here.
 
 ## Spotify development-mode limits
 Checked against developer.spotify.com in November 2026: the February 2026 Web API changelog and migration guide,
