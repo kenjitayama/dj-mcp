@@ -157,6 +157,15 @@ test('a 429 writes nothing for that item and stops; what was found before is kep
   assert.equal(s.searches.length, 2);
 });
 
+test('an item with neither an ISRC nor an artist credit is skipped: no search, nothing recorded', async () => {
+  const f = fakeDjdb({ items: [item(1, { artist: '' }), item(2)] });
+  const s = spotify({ 'track:"Song 2" artist:"Artist 2"': [track('t2', 'Song 2', 'Artist 2')] });
+  const r = await run(f, s, { n: 2 });
+  assert.deepEqual(s.searches.map((x) => x.q), ['track:"Song 2" artist:"Artist 2"']);
+  assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t2']);
+  assert.deepEqual(f.calls.external[0].results.map((x) => x.rank), [2]);
+});
+
 test('a 429 on the first item records nothing at all', async () => {
   const f = fakeDjdb({ items: [item(1), item(2)] });
   const s = spotify({}, { limited: ['track:"Song 1" artist:"Artist 1"'] });
