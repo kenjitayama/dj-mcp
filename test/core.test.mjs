@@ -121,13 +121,13 @@ test('401 triggers exactly one refresh, retries, and persists rotated refresh to
       respond: (u, init) => {
         apiHits++;
         if (init.headers.Authorization === 'Bearer AT-old') return { status: 401, body: { error: { status: 401, message: 'The access token expired' } } };
-        return { body: { devices: [{ id: 'd1', name: 'Living Room Mac', type: 'Computer', is_active: true, volume_percent: 60, is_private_session: false, supports_volume: true }] } };
+        return { body: { devices: [{ id: 'd1', name: 'Example Speaker One', type: 'Computer', is_active: true, volume_percent: 60, is_private_session: false, supports_volume: true }] } };
       },
     },
   ]);
   const core = createCore({ configDir: dir, clientId: 'cid', fetch: f });
   const r = await core.callTool('get_devices');
-  assert.deepEqual(r, { devices: [{ id: 'd1', name: 'Living Room Mac', type: 'Computer', is_active: true, volume_percent: 60 }] });
+  assert.deepEqual(r, { devices: [{ id: 'd1', name: 'Example Speaker One', type: 'Computer', is_active: true, volume_percent: 60 }] });
   assert.equal(apiHits, 2);
   const refreshCalls = f.calls.filter((c) => isToken(c.url));
   assert.equal(refreshCalls.length, 1);
@@ -253,7 +253,7 @@ test('play builds body (uris / context+offset / device), validates input', async
   const dir = tmpDir();
   seedTokens(dir);
   const f = mockFetch([
-    { match: (u) => u.includes('/me/player/devices'), respond: { body: { devices: [{ id: 'mac1', name: 'Living Room Mac', type: 'Computer', is_active: false, volume_percent: 50 }] } } },
+    { match: (u) => u.includes('/me/player/devices'), respond: { body: { devices: [{ id: 'mac1', name: 'Example Speaker One', type: 'Computer', is_active: false, volume_percent: 50 }] } } },
     { match: () => true, respond: { status: 204 } },
   ]);
   const core = createCore({ configDir: dir, fetch: f });
@@ -262,7 +262,7 @@ test('play builds body (uris / context+offset / device), validates input', async
   assert.equal(new URL(c.url).pathname, '/v1/me/player/play');
   assert.equal(new URL(c.url).searchParams.get('device_id'), 'dev9');
   assert.deepEqual(JSON.parse(c.init.body), { uris: ['spotify:track:4uLU6hMCjMI75M1A2tKUQC'] });
-  await core.callTool('play', { context_uri: 'spotify:playlist:37i9dQZF1DX0XUsuxWHRQd', offset: 3, device_name: 'living room' });
+  await core.callTool('play', { context_uri: 'spotify:playlist:37i9dQZF1DX0XUsuxWHRQd', offset: 3, device_name: 'example speaker' });
   c = f.calls.at(-1);
   assert.equal(new URL(c.url).searchParams.get('device_id'), 'mac1');
   assert.deepEqual(JSON.parse(c.init.body), { context_uri: 'spotify:playlist:37i9dQZF1DX0XUsuxWHRQd', offset: { position: 3 } });

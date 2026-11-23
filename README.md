@@ -121,7 +121,7 @@ $SDJ auth_start
 $SDJ auth_complete --redirect_url 'http://127.0.0.1:8888/callback?code=...&state=...'   # keep the single quotes
 $SDJ search --json '{"query":"artist:\"Bill Evans\" waltz","types":["track"],"limit":5}'
 $SDJ get_devices
-$SDJ transfer_playback --device_name 'Living Room' --play false
+$SDJ transfer_playback --device_name 'Example Speaker' --play false
 $SDJ play --json '{"uris":["spotify:track:..."]}'
 $SDJ play --json '{"context_uri":"spotify:album:...","offset":0}'
 $SDJ set_volume --volume_percent 40
