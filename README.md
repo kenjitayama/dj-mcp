@@ -239,6 +239,9 @@ the March 2026 changelog, and the November 2024 Web API announcement.
   audio analysis, featured playlists, category playlists, and 30-second preview URLs.
   Without djdb-mcp, the agent has to choose tracks itself from search, top items and recent plays.
 
+## Tips
+When the playback target is the Spotify app on an iPhone, iOS can suspend the app in the background. The iPhone may then disappear from `get_devices`, or playback may not start. After asking an agent to play, bring the Spotify app to the foreground (open it), then wait until playback starts or the agent reports a problem.
+
 ## Development
 ```bash
 npm test     # node --test, no network: fetch is mocked; the stdio smoke test spawns the real server with a fake Client ID
