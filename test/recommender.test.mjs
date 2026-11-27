@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createCore } from '../lib/core.mjs';
+import { clampResolveConcurrency, DEFAULT_RESOLVE_CONCURRENCY, MAX_RESOLVE_CONCURRENCY } from '../lib/recommender.mjs';
 import { fakeDjdb, item } from './djdb-fake.mjs';
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -81,14 +82,14 @@ const track = (id, name, artist, { isrc, playable = true } = {}) => ({
 });
 
 /** Spotify search answered from `byQuery` (query string → tracks), `raw` (query → whole body), or a 429 for queries in `limited`. */
-function spotify(byQuery = {}, { limited = [], raw = {} } = {}) {
+function spotify(byQuery = {}, { limited = [], raw = {}, retryAfter = 120 } = {}) {
   const searches = [];
   const fetch = async (url) => {
     const u = new URL(String(url));
     if (u.pathname === '/v1/search') {
       const q = u.searchParams.get('q');
       searches.push({ q, market: u.searchParams.get('market'), type: u.searchParams.get('type') });
-      if (limited.includes(q)) return new Response('{}', { status: 429, headers: { 'retry-after': '120' } });
+      if (limited.includes(q)) return new Response('{}', { status: 429, headers: { 'retry-after': String(retryAfter) } });
       if (q in raw) return new Response(JSON.stringify(raw[q]), { status: 200 });
       return new Response(JSON.stringify({ tracks: { items: byQuery[q] || [] } }), { status: 200 });
     }
@@ -97,7 +98,7 @@ function spotify(byQuery = {}, { limited = [], raw = {} } = {}) {
   return { fetch, searches };
 }
 
-const run = (f, s, args = {}) => createCore({ configDir: authorizedDir(), clientId: 'cid', djdb: f.djdb, fetch: s.fetch, sleep: async () => {} }).callTool('recommend', args);
+const run = (f, s, args = {}, extra = {}) => createCore({ configDir: authorizedDir(), clientId: 'cid', djdb: f.djdb, fetch: s.fetch, sleep: async () => {}, ...extra }).callTool('recommend', args);
 
 test('a cached play target needs no search', async () => {
   const f = fakeDjdb({ items: [item(1, { playable: { provider: 'spotify', ext_id: 'c1', play_uri: 'spotify:track:c1', market: 'JP', resolved_by: 'cache' } })] });
@@ -163,7 +164,7 @@ test('a search response without tracks.items stops the walk and records nothing 
   assert.equal(r.stopped.code, 'spotify_bad_response');
   assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t1']);
   assert.deepEqual(f.calls.external[0].results.map((x) => [x.rank, x.status]), [[1, 'ok']]);
-  assert.equal(s.searches.length, 2);
+  assert.equal(s.searches.length, 3, 'the first wave may already have launched later searches');
 });
 
 test('a Spotify track already picked is not used twice; the walk moves on to the next item', async () => {
@@ -192,7 +193,7 @@ test('a 429 writes nothing for that item and stops; what was found before is kep
   assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t1']);
   assert.deepEqual(f.calls.external[0].results.map((x) => x.rank), [1]);
   assert.deepEqual(f.calls.events.map((e) => e.rank), [1]);
-  assert.equal(s.searches.length, 2);
+  assert.equal(s.searches.length, 3, 'the first wave may already have launched later searches');
 });
 
 test('an item with neither an ISRC nor an artist credit is skipped: no search, nothing recorded', async () => {
@@ -212,6 +213,370 @@ test('a 429 on the first item records nothing at all', async () => {
   assert.deepEqual(r.items, []);
   assert.deepEqual(f.calls.external, []);
   assert.deepEqual(f.calls.events, []);
+});
+
+// Controllable search: hold each query until release(q), and record peak in-flight count
+// and actual completion order. when() is event-driven (notified on start and end).
+function gatedSpotify(byQuery = {}, { limited = [], raw = {}, errors = {}, retryAfter = 120, honorSignal = false } = {}) {
+  const searches = [];
+  const completed = [];
+  let current = 0;
+  let peak = 0;
+  const gates = new Map();
+  const waiters = [];
+  const notify = () => { for (const fn of waiters.slice()) fn(); };
+  const gate = (q) => {
+    if (!gates.has(q)) {
+      let resolve;
+      const promise = new Promise((r) => { resolve = r; });
+      gates.set(q, { promise, resolve });
+    }
+    return gates.get(q);
+  };
+  const abortErr = (signal) => (typeof DOMException === 'function'
+    ? new DOMException(signal?.reason || 'The operation was aborted.', 'AbortError')
+    : Object.assign(new Error(signal?.reason || 'The operation was aborted.'), { name: 'AbortError', code: 'ABORT_ERR' }));
+  const waitForGate = (q, signal) => {
+    if (!signal) return gate(q).promise;
+    if (signal.aborted) return Promise.reject(abortErr(signal));
+    return new Promise((resolve, reject) => {
+      const onAbort = () => { cleanup(); reject(abortErr(signal)); };
+      const cleanup = () => signal.removeEventListener('abort', onAbort);
+      signal.addEventListener('abort', onAbort, { once: true });
+      gate(q).promise.then((v) => { cleanup(); resolve(v); }, (e) => { cleanup(); reject(e); });
+    });
+  };
+  const fetch = async (url, init = {}) => {
+    const u = new URL(String(url));
+    if (u.pathname === '/v1/search') {
+      const q = u.searchParams.get('q');
+      const signal = honorSignal ? init.signal : undefined;
+      current++;
+      peak = Math.max(peak, current);
+      searches.push({ q, market: u.searchParams.get('market'), type: u.searchParams.get('type') });
+      notify();
+      try {
+        await waitForGate(q, signal);
+        if (q in errors) throw errors[q];
+        if (limited.includes(q)) return new Response('{}', { status: 429, headers: { 'retry-after': String(retryAfter) } });
+        if (q in raw) return new Response(JSON.stringify(raw[q]), { status: 200 });
+        return new Response(JSON.stringify({ tracks: { items: byQuery[q] || [] } }), { status: 200 });
+      } finally {
+        completed.push(q);
+        current--;
+        notify();
+      }
+    }
+    return new Response(JSON.stringify({ error: { message: `no route ${u.pathname}` } }), { status: 404 });
+  };
+  return {
+    fetch,
+    searches,
+    completed,
+    get peak() { return peak; },
+    get inFlight() { return current; },
+    release(q) { gate(q).resolve(); },
+    when(pred, label = 'searches') {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const timeout = setTimeout(() => finish(() => reject(new Error(`timeout waiting for ${label}`))), 2000);
+        const tick = () => {
+          try {
+            if (pred()) finish(resolve);
+          } catch (e) {
+            finish(() => reject(e));
+          }
+        };
+        const finish = (fn) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          const i = waiters.indexOf(tick);
+          if (i >= 0) waiters.splice(i, 1);
+          fn();
+        };
+        waiters.push(tick);
+        tick();
+      });
+    },
+  };
+}
+
+const nameQ = (k) => `track:"Song ${k}" artist:"Artist ${k}"`;
+const playable = (k) => ({ [nameQ(k)]: [track(`t${k}`, `Song ${k}`, `Artist ${k}`)] });
+const allPlayable = (ranks) => Object.assign({}, ...ranks.map(playable));
+
+test('at most 4 Spotify searches run at once, and only as many as are still needed to fill n', async () => {
+  assert.equal(DEFAULT_RESOLVE_CONCURRENCY, 4);
+  const f = fakeDjdb({ items: [1, 2, 3, 4, 5, 6, 7, 8].map((k) => item(k)) });
+  const s = gatedSpotify(allPlayable([1, 2, 3, 4, 5, 6, 7, 8]));
+  const done = run(f, s, { n: 6 });
+  await s.when(() => s.inFlight === 4);
+  assert.equal(s.peak, 4);
+  assert.deepEqual(s.searches.map((x) => x.q), [1, 2, 3, 4].map(nameQ));
+  for (const k of [1, 2, 3, 4]) s.release(nameQ(k));
+  await s.when(() => s.searches.length === 6);
+  assert.equal(s.peak, 4);
+  assert.equal(s.inFlight, 2);
+  assert.deepEqual(s.searches.map((x) => x.q), [1, 2, 3, 4, 5, 6].map(nameQ));
+  s.release(nameQ(5));
+  s.release(nameQ(6));
+  const r = await done;
+  assert.deepEqual(r.items.map((i) => i.uri), [1, 2, 3, 4, 5, 6].map((k) => `spotify:track:t${k}`));
+  assert.equal(s.searches.length, 6, 'items after the n-th playable one are not searched');
+  assert.equal(s.peak, 4);
+});
+
+test('when n is below the cap, the first wave is min(4, n) searches, not 4', async () => {
+  const f = fakeDjdb({ items: [1, 2, 3, 4, 5, 6].map((k) => item(k)) });
+  const s = gatedSpotify(allPlayable([1, 2, 3, 4, 5, 6]));
+  const done = run(f, s, { n: 2 });
+  await s.when(() => s.inFlight === 2);
+  assert.equal(s.peak, 2);
+  assert.deepEqual(s.searches.map((x) => x.q), [1, 2].map(nameQ));
+  s.release(nameQ(1));
+  s.release(nameQ(2));
+  const r = await done;
+  assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t1', 'spotify:track:t2']);
+  assert.equal(s.searches.length, 2);
+  assert.equal(s.peak, 2);
+});
+
+test('results stay in rank order when later searches finish first', async () => {
+  const f = fakeDjdb({ items: [1, 2, 3, 4].map((k) => item(k)) });
+  const s = gatedSpotify(allPlayable([1, 2, 3, 4]));
+  const done = run(f, s, { n: 4 });
+  await s.when(() => s.inFlight === 4);
+  for (const k of [4, 3, 2, 1]) s.release(nameQ(k));
+  const r = await done;
+  assert.deepEqual(s.completed, [4, 3, 2, 1].map(nameQ), 'searches completed in reverse rank order');
+  assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t1', 'spotify:track:t2', 'spotify:track:t3', 'spotify:track:t4']);
+  assert.deepEqual(f.calls.external[0].results.map((x) => x.rank), [1, 2, 3, 4]);
+  assert.deepEqual(f.calls.events.map((e) => e.rank), [1, 2, 3, 4]);
+});
+
+test('a duplicate URI found concurrently keeps the higher-ranked item and fills n from later items', async () => {
+  const f = fakeDjdb({ items: [1, 2, 3, 4].map((k) => item(k)) });
+  const s = gatedSpotify({
+    [nameQ(1)]: [track('t1', 'Song 1', 'Artist 1')],
+    [nameQ(2)]: [track('t1', 'Song 2', 'Artist 2')],
+    [nameQ(3)]: [track('t3', 'Song 3', 'Artist 3')],
+    [nameQ(4)]: [track('t4', 'Song 4', 'Artist 4')],
+  });
+  const done = run(f, s, { n: 3 });
+  await s.when(() => s.inFlight === 3);
+  assert.deepEqual(s.searches.map((x) => x.q), [1, 2, 3].map(nameQ), 'first wave is min(4, n), before the duplicate is known');
+  s.release(nameQ(2));
+  s.release(nameQ(3));
+  s.release(nameQ(1));
+  await s.when(() => s.searches.length === 4);
+  s.release(nameQ(4));
+  const r = await done;
+  assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t1', 'spotify:track:t3', 'spotify:track:t4']);
+  assert.deepEqual(f.calls.external[0].results.map((x) => [x.rank, x.status]), [[1, 'ok'], [3, 'ok'], [4, 'ok']]);
+  assert.deepEqual(f.calls.events.map((e) => e.rank), [1, 3, 4]);
+});
+
+test('a 429 discards later in-flight matches, keeps earlier picks, and launches no new searches', async () => {
+  const f = fakeDjdb({ items: [1, 2, 3, 4, 5, 6].map((k) => item(k)) });
+  const s = gatedSpotify(allPlayable([1, 2, 3, 4, 5, 6]), { limited: [nameQ(2)] });
+  const done = run(f, s, { n: 6 });
+  await s.when(() => s.inFlight === 4);
+  s.release(nameQ(1));
+  s.release(nameQ(2));
+  await s.when(() => s.inFlight === 2);
+  assert.deepEqual(s.searches.map((x) => x.q), [1, 2, 3, 4].map(nameQ), 'no search is launched after the 429 is known');
+  s.release(nameQ(3));
+  s.release(nameQ(4));
+  const r = await done;
+  assert.equal(r.stopped.code, 'rate_limited');
+  assert.equal(r.stopped.retry_after, 120);
+  assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t1']);
+  assert.deepEqual(f.calls.external[0].results.map((x) => x.rank), [1]);
+  assert.deepEqual(f.calls.events.map((e) => e.rank), [1]);
+  assert.equal(s.searches.length, 4);
+});
+
+test('a network error stops the same way as a 429', async () => {
+  const f = fakeDjdb({ items: [1, 2, 3].map((k) => item(k)) });
+  const s = gatedSpotify(allPlayable([1, 2, 3]), { errors: { [nameQ(2)]: new Error('socket hang up') } });
+  const done = run(f, s, { n: 3 });
+  await s.when(() => s.inFlight === 3);
+  s.release(nameQ(1));
+  s.release(nameQ(2));
+  s.release(nameQ(3));
+  const r = await done;
+  assert.equal(r.stopped.code, 'error');
+  assert.match(r.stopped.message, /socket hang up/);
+  assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t1']);
+  assert.deepEqual(f.calls.external[0].results.map((x) => x.rank), [1]);
+  assert.deepEqual(f.calls.events.map((e) => e.rank), [1]);
+  assert.equal(s.searches.length, 3);
+});
+
+test('cached, unplayable, not_found and valid items can be mixed; caches do not take a search slot', async () => {
+  const f = fakeDjdb({ items: [
+    item(1, { playable: { play_uri: 'spotify:track:c1' } }),
+    item(2),
+    item(3),
+    item(4),
+    item(5, { playable: { play_uri: 'spotify:track:c1' } }),
+    item(6),
+    item(7, { artist: '' }),
+    item(8),
+  ] });
+  const s = gatedSpotify({
+    [nameQ(2)]: [track('x2', 'Other Song', 'Artist 2')],
+    [nameQ(3)]: [track('t3', 'Song 3', 'Artist 3')],
+    [nameQ(6)]: [track('t6', 'Song 6', 'Artist 6')],
+    [nameQ(8)]: [track('t8', 'Song 8', 'Artist 8')],
+  });
+  const done = run(f, s, { n: 3 });
+  // Rank 1 is cached and committed immediately, so remaining need is 2: only two searches start.
+  await s.when(() => s.inFlight === 2);
+  assert.equal(s.peak, 2);
+  assert.deepEqual(s.searches.map((x) => x.q), [nameQ(2), nameQ(3)]);
+  s.release(nameQ(2));
+  s.release(nameQ(3));
+  // Rank 2 is a different recording (not a miss), rank 3 matches; still need one more.
+  // Rank 4 returns no tracks (not_found, recorded), rank 5 is a cached duplicate, rank 7 has
+  // no artist: none of those fill n, so rank 6 is searched and taken.
+  await s.when(() => s.searches.some((x) => x.q === nameQ(4)));
+  s.release(nameQ(4));
+  await s.when(() => s.searches.some((x) => x.q === nameQ(6)));
+  s.release(nameQ(6));
+  const r = await done;
+  assert.deepEqual(r.items.map((i) => [i.uri, i.resolved_by]), [
+    ['spotify:track:c1', 'cache'],
+    ['spotify:track:t3', 'search'],
+    ['spotify:track:t6', 'search'],
+  ]);
+  assert.deepEqual(f.calls.external[0].results.map((x) => [x.rank, x.status]), [
+    [3, 'ok'],
+    [4, 'not_found'],
+    [6, 'ok'],
+  ]);
+  assert.deepEqual(f.calls.events.map((e) => e.rank), [1, 3, 6]);
+  assert.deepEqual(s.searches.map((x) => x.q), [nameQ(2), nameQ(3), nameQ(4), nameQ(6)]);
+  assert.equal(s.peak, 2);
+  assert.ok(!s.searches.some((x) => x.q === nameQ(8)));
+});
+
+test('recommend returns promptly when a later in-flight search never settles after an earlier failure', async () => {
+  const f = fakeDjdb({ items: [1, 2, 3].map((k) => item(k)) });
+  const s = gatedSpotify(allPlayable([1, 2, 3]), { limited: [nameQ(2)] });
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const done = run(f, s, { n: 3 });
+    await s.when(() => s.inFlight === 3);
+    s.release(nameQ(1));
+    s.release(nameQ(2));
+    // Rank 3 is left held: it never settles.
+    const r = await Promise.race([
+      done,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('recommend hung waiting for a later in-flight search')), 1000)),
+    ]);
+    assert.equal(r.stopped.code, 'rate_limited');
+    assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t1']);
+    assert.deepEqual(f.calls.external[0].results.map((x) => x.rank), [1]);
+    assert.equal(s.searches.length, 3);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
+
+test('a later in-flight fetch that honors signal is aborted on early-stop', async () => {
+  const f = fakeDjdb({ items: [1, 2, 3].map((k) => item(k)) });
+  const s = gatedSpotify(allPlayable([1, 2, 3]), { limited: [nameQ(2)], honorSignal: true });
+  const done = run(f, s, { n: 3 });
+  await s.when(() => s.inFlight === 3);
+  s.release(nameQ(1));
+  s.release(nameQ(2));
+  const r = await done;
+  await s.when(() => s.inFlight === 0, 'aborted in-flight searches to settle');
+  assert.equal(s.inFlight, 0);
+  assert.ok(s.completed.includes(nameQ(3)), 'the later fetch rejected via signal abort');
+  assert.equal(r.stopped.code, 'rate_limited');
+  assert.deepEqual(r.items.map((i) => i.uri), ['spotify:track:t1']);
+  assert.deepEqual(f.calls.external[0].results.map((x) => x.rank), [1]);
+});
+
+test('a retryable 429 is not retried or amplified across concurrent searches', async () => {
+  const slept = [];
+  const f = fakeDjdb({ items: [1, 2, 3, 4, 5, 6].map((k) => item(k)) });
+  const s = spotify(allPlayable([1, 2, 3, 4, 5, 6]), { limited: [1, 2, 3, 4, 5, 6].map(nameQ), retryAfter: 2 });
+  const r = await run(f, s, { n: 6 }, { sleep: async (ms) => slept.push(ms) });
+  assert.equal(r.stopped.code, 'rate_limited');
+  assert.equal(r.stopped.retry_after, 2);
+  assert.deepEqual(r.items, []);
+  assert.deepEqual(f.calls.external, []);
+  assert.deepEqual(slept, [], 'recommend searches must not sleep-and-retry a 429');
+  assert.equal(s.searches.length, 4, 'only the first wave is sent; no retries after the 429');
+  assert.deepEqual([...new Set(s.searches.map((x) => x.q))], [1, 2, 3, 4].map(nameQ));
+});
+
+test('n=1 searches only the first needed item; n=20 fills all twenty in rank order', async () => {
+  const one = fakeDjdb({ items: [1, 2, 3, 4, 5].map((k) => item(k)) });
+  const s1 = spotify(allPlayable([1, 2, 3, 4, 5]));
+  const r1 = await run(one, s1, { n: 1 });
+  assert.deepEqual(r1.items.map((i) => i.uri), ['spotify:track:t1']);
+  assert.deepEqual(s1.searches.map((x) => x.q), [nameQ(1)]);
+  assert.deepEqual(one.calls.events.map((e) => e.rank), [1]);
+
+  const ranks = Array.from({ length: 20 }, (_, i) => i + 1);
+  const many = fakeDjdb({ items: ranks.map((k) => item(k)) });
+  const s20 = spotify(allPlayable(ranks));
+  const r20 = await run(many, s20, { n: 20 });
+  assert.deepEqual(r20.items.map((i) => i.uri), ranks.map((k) => `spotify:track:t${k}`));
+  assert.deepEqual(s20.searches.map((x) => x.q), ranks.map(nameQ));
+  assert.deepEqual(many.calls.events.map((e) => e.rank), ranks);
+  assert.deepEqual(many.calls.external[0].results.map((x) => x.rank), ranks);
+});
+
+test('empty items and an all-cached list need no search', async () => {
+  const empty = fakeDjdb({ items: [] });
+  const s0 = spotify();
+  const r0 = await run(empty, s0, { n: 5 });
+  assert.deepEqual(r0.items, []);
+  assert.equal(r0.reason, 'no playable recommendations');
+  assert.equal(s0.searches.length, 0);
+  assert.deepEqual(empty.calls.external, []);
+  assert.deepEqual(empty.calls.events, []);
+
+  const cached = fakeDjdb({ items: [
+    item(1, { playable: { play_uri: 'spotify:track:c1' } }),
+    item(2, { playable: { play_uri: 'spotify:track:c2' } }),
+    item(3, { playable: { play_uri: 'spotify:track:c3' } }),
+    item(4, { playable: { play_uri: 'spotify:track:c2' } }),
+    item(5, { playable: { play_uri: 'spotify:track:c5' } }),
+  ] });
+  const sC = spotify();
+  const rC = await run(cached, sC, { n: 3 });
+  assert.deepEqual(rC.items.map((i) => [i.uri, i.resolved_by]), [
+    ['spotify:track:c1', 'cache'],
+    ['spotify:track:c2', 'cache'],
+    ['spotify:track:c3', 'cache'],
+  ]);
+  assert.equal(sC.searches.length, 0);
+  assert.deepEqual(cached.calls.external, []);
+  assert.deepEqual(cached.calls.events.map((e) => e.rank), [1, 2, 3]);
+});
+
+test('resolve concurrency is clamped to 1..4; invalid values become the default', () => {
+  assert.equal(MAX_RESOLVE_CONCURRENCY, 4);
+  assert.equal(clampResolveConcurrency(10), 4);
+  assert.equal(clampResolveConcurrency(Infinity), 4);
+  assert.equal(clampResolveConcurrency(0), 4);
+  assert.equal(clampResolveConcurrency(-1), 4);
+  assert.equal(clampResolveConcurrency(NaN), 4);
+  assert.equal(clampResolveConcurrency(), 4);
+  assert.equal(clampResolveConcurrency(1), 1);
+  assert.equal(clampResolveConcurrency(3), 3);
+  assert.equal(clampResolveConcurrency(4), 4);
 });
 
 // ---- R4: seeds ----

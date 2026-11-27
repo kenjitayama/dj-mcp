@@ -177,6 +177,61 @@ test('429 honors Retry-After then succeeds; long Retry-After surfaces rate_limit
   await assert.rejects(core2.callTool('next'), (e) => e.code === 'rate_limited' && e.retry_after === 120);
 });
 
+test('aborting during a Retry-After delay rejects promptly and cancels the timer', async () => {
+  const dir = tmpDir();
+  seedTokens(dir);
+
+  const pending = new Set();
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    const id = realSetTimeout((...a) => {
+      pending.delete(id);
+      fn(...a);
+    }, ms, ...args);
+    if (ms >= 1000) pending.add(id);
+    return id;
+  };
+  globalThis.clearTimeout = (id) => {
+    pending.delete(id);
+    return realClearTimeout(id);
+  };
+  try {
+    const ac = new AbortController();
+    let fetches = 0;
+    const f = mockFetch([{
+      match: () => true,
+      respond: () => {
+        fetches++;
+        realSetTimeout(() => ac.abort(), 5);
+        return { status: 429, headers: { 'retry-after': '30' } };
+      },
+    }]);
+    const core = createCore({ configDir: dir, fetch: f });
+    await assert.rejects(core.api('POST', '/me/player/next', { signal: ac.signal }), (e) => e.name === 'AbortError');
+    assert.equal(fetches, 1, 'a cancelled retry delay must not issue another request');
+    assert.equal(pending.size, 0, 'the Retry-After timer was cleared');
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  }
+
+  const ac2 = new AbortController();
+  let sleepStarted = 0;
+  const f2 = mockFetch([{ match: () => true, respond: { status: 429, headers: { 'retry-after': '2' } } }]);
+  const core2 = createCore({
+    configDir: dir,
+    fetch: f2,
+    sleep: async () => {
+      sleepStarted++;
+      ac2.abort();
+    },
+  });
+  await assert.rejects(core2.api('POST', '/me/player/next', { signal: ac2.signal }), (e) => e.name === 'AbortError');
+  assert.equal(sleepStarted, 1);
+  assert.equal(f2.calls.length, 1, 'a missed sync abort would retry and fetch again');
+});
+
 test('search clamps limit to 10, trims shapes, drops null playlist entries', async () => {
   const dir = tmpDir();
   seedTokens(dir);
